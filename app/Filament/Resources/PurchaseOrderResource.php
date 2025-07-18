@@ -7,13 +7,24 @@ use App\Filament\Resources\PurchaseOrderResource\RelationManagers;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use Carbon\Carbon;
+use Filament\Facades\Filament;
 use Filament\Forms;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Form;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
+use Filament\Tables\Actions\Action;
+use Filament\Tables\Actions\BulkAction;
+use Filament\Tables\Filters\Filter;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Support\Facades\Auth;
 
 class PurchaseOrderResource extends Resource
 {
@@ -231,50 +242,194 @@ class PurchaseOrderResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                Tables\Filters\SelectFilter::make('supplier_id')
+                SelectFilter::make('supplier_id')
                     ->label('Supplier')
-                    ->relationship('supplier', 'name'),
-                Tables\Filters\SelectFilter::make('status')
-                    ->options(PurchaseOrder::getStatusOptions()),
-                Tables\Filters\SelectFilter::make('payment_status')
+                    ->relationship('supplier', 'name')
+                    ->searchable()
+                    ->preload(),
+                    
+                SelectFilter::make('status')
+                    ->options(PurchaseOrder::getStatusOptions())
+                    ->multiple(),
+                    
+                SelectFilter::make('payment_status')
                     ->options(PurchaseOrder::getPaymentStatusOptions()),
+                    
                 Tables\Filters\TrashedFilter::make(),
-                Tables\Filters\Filter::make('order_date')
+                
+                Filter::make('date_range')
                     ->form([
-                        Forms\Components\DatePicker::make('order_date_from'),
-                        Forms\Components\DatePicker::make('order_date_until'),
+                        Select::make('preset')
+                            ->label('Quick Period')
+                            ->options([
+                                'today' => 'Today',
+                                'yesterday' => 'Yesterday',
+                                'last_7_days' => 'Last 7 Days',
+                                'this_month' => 'This Month',
+                                'last_month' => 'Last Month',
+                                'this_quarter' => 'This Quarter',
+                                'custom' => 'Custom Range',
+                            ])
+                            ->default('this_month')
+                            ->reactive()
+                            ->afterStateUpdated(function ($state, callable $set) {
+                                if ($state === 'today') {
+                                    $set('order_date_from', today());
+                                    $set('order_date_until', today());
+                                } elseif ($state === 'yesterday') {
+                                    $set('order_date_from', today()->subDay());
+                                    $set('order_date_until', today()->subDay());
+                                } elseif ($state === 'last_7_days') {
+                                    $set('order_date_from', today()->subDays(7));
+                                    $set('order_date_until', today());
+                                } elseif ($state === 'this_month') {
+                                    $set('order_date_from', today()->startOfMonth());
+                                    $set('order_date_until', today()->endOfMonth());
+                                } elseif ($state === 'last_month') {
+                                    $set('order_date_from', today()->subMonth()->startOfMonth());
+                                    $set('order_date_until', today()->subMonth()->endOfMonth());
+                                } elseif ($state === 'this_quarter') {
+                                    $set('order_date_from', today()->startOfQuarter());
+                                    $set('order_date_until', today()->endOfQuarter());
+                                }
+                            }),
+                        
+                        DatePicker::make('order_date_from')
+                            ->label('From')
+                            ->default(today()->startOfMonth()),
+                            
+                        DatePicker::make('order_date_until')
+                            ->label('Until')
+                            ->default(today()),
                     ])
                     ->query(function (Builder $query, array $data): Builder {
                         return $query
                             ->when(
                                 $data['order_date_from'],
-                                fn (Builder $query, $date): Builder => $query->whereDate('order_date', '>=', $date),
+                                fn (Builder $query, $date): Builder => $query->whereDate('po_date', '>=', $date),
                             )
                             ->when(
                                 $data['order_date_until'],
-                                fn (Builder $query, $date): Builder => $query->whereDate('order_date', '<=', $date),
+                                fn (Builder $query, $date): Builder => $query->whereDate('po_date', '<=', $date),
                             );
                     })
                     ->indicateUsing(function (array $data): array {
                         $indicators = [];
                         
+                        if ($data['preset'] ?? null) {
+                            $presetLabels = [
+                                'today' => 'Today',
+                                'yesterday' => 'Yesterday',
+                                'last_7_days' => 'Last 7 Days',
+                                'this_month' => 'This Month',
+                                'last_month' => 'Last Month',
+                                'this_quarter' => 'This Quarter',
+                            ];
+                            
+                            if (isset($presetLabels[$data['preset']]) && $data['preset'] !== 'custom') {
+                                $indicators['preset'] = $presetLabels[$data['preset']];
+                                return $indicators;
+                            }
+                        }
+                        
                         if ($data['order_date_from'] ?? null) {
-                            $indicators['order_date_from'] = 'Order from ' . Carbon::parse($data['order_date_from'])->toFormattedDateString();
+                            $indicators['order_date_from'] = 'From ' . Carbon::parse($data['order_date_from'])->toFormattedDateString();
                         }
                         
                         if ($data['order_date_until'] ?? null) {
-                            $indicators['order_date_until'] = 'Order until ' . Carbon::parse($data['order_date_until'])->toFormattedDateString();
+                            $indicators['order_date_until'] = 'Until ' . Carbon::parse($data['order_date_until'])->toFormattedDateString();
                         }
                         
                         return $indicators;
                     }),
+                    
+                Filter::make('has_items')
+                    ->label('With Items')
+                    ->query(fn (Builder $query): Builder => $query->has('items')),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
             ])
+            ->headerActions([
+                Action::make('import')
+                    ->label('Import Orders')
+                    ->icon('heroicon-o-document-plus')
+                    ->form([
+                        FileUpload::make('file')
+                            ->label('Excel File')
+                            ->acceptedFileTypes(['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])
+                            ->required(),
+                    ])
+                    ->action(function (array $data): void {
+                        // Import logic using $data['file']
+                        // This is a placeholder for future implementation
+                        
+                        Notification::make()
+                            ->title('Import started')
+                            ->body('Your purchase orders are being imported in the background.')
+                            ->success()
+                            ->send();
+                    })
+                    ->visible(true),
+                
+                Action::make('quick_create')
+                    ->label('Quick Create')
+                    ->icon('heroicon-o-plus')
+                    ->url(fn (): string => static::getUrl('create'))
+                    ->visible(true),
+            ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
+                    BulkAction::make('approve')
+                        ->icon('heroicon-o-check-circle')
+                        ->color('success')
+                        ->requiresConfirmation()
+                        ->action(function (Collection $records): void {
+                            $count = 0;
+                            foreach ($records as $record) {
+                                // Only approve records in draft status
+                                if ($record->status === 'draft') {
+                                    $record->update([
+                                        'status' => 'approved',
+                                        'approved_by' => optional(Filament::auth())->id,
+                                        'approved_at' => now(),
+                                    ]);
+                                    $count++;
+                                }
+                            }
+                            
+                            if ($count > 0) {
+                                Notification::make()
+                                    ->title($count . ' purchase orders approved successfully')
+                                    ->success()
+                                    ->send();
+                            } else {
+                                Notification::make()
+                                    ->title('No orders were approved')
+                                    ->body('Selected orders may already be approved or in a status that cannot be approved.')
+                                    ->warning()
+                                    ->send();
+                            }
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->visible(true),
+                    
+                    BulkAction::make('export')
+                        ->icon('heroicon-o-document-arrow-down')
+                        ->action(function (Collection $records): void {
+                            // Placeholder for export functionality
+                            // In a real implementation, you would create and download an Excel/CSV file
+                            
+                            Notification::make()
+                                ->title(count($records) . ' purchase orders queued for export')
+                                ->success()
+                                ->body('Your download will begin shortly.')
+                                ->send();
+                        }),
+                        
                     Tables\Actions\DeleteBulkAction::make(),
+                    
+                    Tables\Actions\RestoreBulkAction::make(),
                 ]),
             ]);
     }

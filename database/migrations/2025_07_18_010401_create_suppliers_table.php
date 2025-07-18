@@ -24,6 +24,12 @@ return new class extends Migration
             $table->string('postal_code')->nullable();
             $table->string('country')->nullable();
             $table->string('tax_number')->nullable();
+            $table->string('payment_terms')->nullable();
+            $table->string('website')->nullable();
+            $table->string('industry')->nullable();
+            $table->string('bank_name')->nullable();
+            $table->string('bank_account_number')->nullable();
+            $table->string('bank_account_name')->nullable();
             $table->text('notes')->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamps();

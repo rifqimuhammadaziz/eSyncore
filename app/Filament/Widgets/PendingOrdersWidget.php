@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Models\Company;
 use App\Models\PurchaseOrder;
 use App\Models\SalesOrder;
 use Filament\Widgets\Widget;
@@ -16,6 +17,27 @@ class PendingOrdersWidget extends Widget
     protected static ?string $heading = 'Pending Orders';
     
     protected static string $view = 'filament.widgets.pending-orders-widget';
+    
+    /**
+     * Format currency value according to company settings
+     *
+     * @param float $amount
+     * @return string
+     */
+    public function formatCurrency(float $amount): string
+    {
+        // Use company settings for currency if available, or default to IDR
+        $company = Company::first();
+        
+        $currencySymbol = $company ? $company->currency_symbol : 'Rp';
+        $thousandSeparator = $company ? $company->thousand_separator : '.';
+        $decimalSeparator = $company ? $company->decimal_separator : ',';
+        $decimalPrecision = $company ? $company->decimal_precision : 0; // IDR typically uses 0 decimals
+        
+        $formatted = number_format($amount, $decimalPrecision, $decimalSeparator, $thousandSeparator);
+        
+        return $currencySymbol . ' ' . $formatted;
+    }
     
     public function getPendingSalesOrders(): Collection
     {

@@ -50,11 +50,29 @@ class StatsOverviewWidget extends BaseWidget
         $suppliersCount = Supplier::where('is_active', true)->count();
         $customersCount = Customer::where('is_active', true)->count();
         
-        $currency = config('app.currency', '$');
+        // Use company settings for currency if available, or default to IDR
+        $company = \App\Models\Company::first();
+        $currencySymbol = $company ? $company->currency_symbol : 'Rp';
+        $thousandSeparator = $company ? $company->thousand_separator : '.';
+        $decimalSeparator = $company ? $company->decimal_separator : ',';
+        $decimalPrecision = $company ? $company->decimal_precision : 0; // IDR typically uses 0 decimals
+        
+        // Helper function to format currency according to company settings
+        $formatCurrency = function ($amount) use ($currencySymbol, $decimalPrecision, $thousandSeparator, $decimalSeparator) {
+            $formatted = number_format($amount, $decimalPrecision, $decimalSeparator, $thousandSeparator);
+            return $currencySymbol . ' ' . $formatted;
+        };
+        
+        // Format percentage values with 1 decimal place for consistency
+        $formatPercentage = function ($value) {
+            return number_format($value, 1) . '%';
+        };
         
         return [
-            Stat::make('Monthly Sales', $currency . number_format($currentMonthSales, 2))
-                ->description($salesDifference >= 0 ? $salesDifference . '% increase' : abs($salesDifference) . '% decrease')
+            Stat::make('Monthly Sales', $formatCurrency($currentMonthSales))
+                ->description($salesDifference >= 0 
+                    ? $formatPercentage($salesDifference) . ' increase' 
+                    : $formatPercentage(abs($salesDifference)) . ' decrease')
                 ->descriptionIcon($salesDifference >= 0 ? 'heroicon-m-arrow-trending-up' : 'heroicon-m-arrow-trending-down')
                 ->color($salesDifference >= 0 ? 'success' : 'danger')
                 ->chart([
@@ -62,8 +80,10 @@ class StatsOverviewWidget extends BaseWidget
                     $currentMonthSales / 1000,
                 ]),
                 
-            Stat::make('Monthly Purchases', $currency . number_format($currentMonthPurchases, 2))
-                ->description($purchasesDifference >= 0 ? $purchasesDifference . '% increase' : abs($purchasesDifference) . '% decrease')
+            Stat::make('Monthly Purchases', $formatCurrency($currentMonthPurchases))
+                ->description($purchasesDifference >= 0 
+                    ? $formatPercentage($purchasesDifference) . ' increase' 
+                    : $formatPercentage(abs($purchasesDifference)) . ' decrease')
                 ->descriptionIcon($purchasesDifference >= 0 ? 'heroicon-m-arrow-trending-up' : 'heroicon-m-arrow-trending-down')
                 ->color($purchasesDifference >= 0 ? 'warning' : 'success')
                 ->chart([
@@ -71,7 +91,7 @@ class StatsOverviewWidget extends BaseWidget
                     $currentMonthPurchases / 1000,
                 ]),
                 
-            Stat::make('Profit Margin', $currency . number_format($currentMonthSales - $currentMonthPurchases, 2))
+            Stat::make('Profit Margin', $formatCurrency($currentMonthSales - $currentMonthPurchases))
                 ->description('Current Month')
                 ->color('success'),
                 

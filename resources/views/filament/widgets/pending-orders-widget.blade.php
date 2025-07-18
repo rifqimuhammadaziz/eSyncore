@@ -24,7 +24,7 @@
                                     </td>
                                     <td class="px-4 py-2">{{ $salesOrder->customer->name ?? 'N/A' }}</td>
                                     <td class="px-4 py-2">{{ $salesOrder->order_date->format('M d, Y') }}</td>
-                                    <td class="px-4 py-2">{{ config('app.currency', '$') . number_format($salesOrder->grand_total, 2) }}</td>
+                                    <td class="px-4 py-2">{{ $this->formatCurrency($salesOrder->grand_total) }}</td>
                                 </tr>
                             @endforeach
                         </tbody>
@@ -66,7 +66,7 @@
                                     </td>
                                     <td class="px-4 py-2">{{ $purchaseOrder->supplier->name ?? 'N/A' }}</td>
                                     <td class="px-4 py-2">{{ $purchaseOrder->order_date->format('M d, Y') }}</td>
-                                    <td class="px-4 py-2">{{ config('app.currency', '$') . number_format($purchaseOrder->grand_total, 2) }}</td>
+                                    <td class="px-4 py-2">{{ $this->formatCurrency($purchaseOrder->grand_total) }}</td>
                                 </tr>
                             @endforeach
                         </tbody>
